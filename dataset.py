@@ -25,6 +25,11 @@ import os
 import glob
 import time 
 
+import rospy
+import rosbag
+from std_msgs.msg import Int32, String
+from PIL import ImageFile  
+
 from multiprocessing import Process, Queue, Value 
 from utils import Printer 
 
@@ -36,6 +41,7 @@ class DatasetType(Enum):
     VIDEO = 4
     FOLDER = 5  # generic folder of pics 
     LIVE = 6
+    ROSBAG = 7
 
 
 def dataset_factory(settings):
@@ -63,6 +69,8 @@ def dataset_factory(settings):
         dataset = TumDataset(path, name, associations, DatasetType.TUM)
     if type == 'video':
         dataset = VideoDataset(path, name, associations, DatasetType.VIDEO)   
+    if type == 'rosbag':
+        dataset = ROSDataset(path, name, associations, DatasetType.ROSBAG)
     if type == 'folder':
         fps = 10 # a default value 
         if 'fps' in settings:
@@ -155,6 +163,55 @@ class VideoDataset(Dataset):
             print('ERROR while reading from file: ', self.filename)
         return image       
 
+
+def img_from_CompressedImage(msg):
+    parser = ImageFile.Parser()
+    parser.feed(msg.data)
+    res = parser.close()            
+    return np.array(res) 
+
+
+class ROSDataset(Dataset): 
+    def __init__(self, path, name, associations=None, type=DatasetType.ROSBAG): 
+        super().__init__(path, name, None, associations, type)    
+        self.filename = path + '/' + name 
+
+        # TODO: handle bag file closing
+        bag = rosbag.Bag(self.filename)
+        print('ROS bag: ', self.filename)
+        cam_topic = "/camera/image_raw/compressed"
+        start_time = rospy.Time(bag.get_start_time() + 625.0 + 20.0)
+        self.cam_msgs = bag.read_messages(start_time=start_time, topics=[cam_topic])
+
+        print('Processing first ROSBAG message')
+        topic, msg, t = next(self.cam_msgs)
+        img = img_from_CompressedImage(msg)
+
+        # Read again to reset first first element in cam msgs generator
+        self.cam_msgs = bag.read_messages(start_time=start_time, topics=[cam_topic])
+
+        self.num_frames = int(bag.get_message_count(cam_topic))
+        self.width = int(img.shape[1])
+        self.height = int(img.shape[0])
+        self.fps = 10 # NOTE: HARDCODED 
+        self.Ts = 1./self.fps 
+        print('num frames: ', self.num_frames)  
+        print('fps: ', self.fps)              
+
+        self.is_init = False   
+            
+    def getImage(self, frame_id):
+        self.is_init = True
+        topic, msg, t = next(self.cam_msgs)
+        image = img_from_CompressedImage(msg)
+        self._timestamp = t.to_sec()
+        self._next_timestamp = self._timestamp + self.Ts 
+        if image is None:
+            print('ERROR while reading from: ', self.filename)
+
+        # Convert RGB to BGR 
+        image = image[:, :, ::-1]
+        return image   
 
 
 class LiveDataset(Dataset): 
