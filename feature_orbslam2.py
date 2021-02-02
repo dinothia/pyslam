@@ -53,7 +53,25 @@ class Orbslam2Feature2D:
     # compute both keypoints and descriptors       
     def detectAndCompute(self, img, mask=None): #mask is fake: it is not considered by the c++ implementation 
         # detect and compute 
-        kps_tuples, des = self.orb_extractor.detectAndCompute(img)        
+        kps_tuples, des = self.orb_extractor.detectAndCompute(img)       
+        
+        # Masking features manually using for loop, not generatlized for all
+        # feature detectors
+        WIDTH_MASK = 600
+        HEIGHT_MASK = 850
+        
+        kps_tuples_filtered = []
+        des_filtered = []
+        for i in range(len(kps_tuples)):
+
+            if kps_tuples[i][0] > WIDTH_MASK or kps_tuples[i][1] < HEIGHT_MASK:
+                kps_tuples_filtered.append(kps_tuples[i])
+                des_filtered.append(des[i])
+
+        kps_tuples = kps_tuples_filtered
+        des = np.array(des_filtered)
+        ######################################################################
+        
         # convert keypoints 
-        kps = [cv2.KeyPoint(*kp) for kp in kps_tuples]
-        return kps, des             
+        kps = [cv2.KeyPoint(*kp) for kp in kps_tuples] 
+        return kps, des          
